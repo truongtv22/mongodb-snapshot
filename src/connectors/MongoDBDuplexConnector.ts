@@ -30,6 +30,8 @@ const schema = joi.object({
         collections: joi.array().items(joi.string()).optional(),
         metadatas: joi.array().items(joi.string()).optional(),
         documents_bulk_write_count: joi.number().optional(),
+        mode: joi.string().optional(),
+        upsert_fields: joi.string().optional(),
     }).required(),
 });
 
@@ -67,7 +69,7 @@ export class MongoDBDuplexConnector extends Validatable implements SourceConnect
 
         this.assource = loMerge({ bulk_read_size: 50 * 1024 }, assource);
 
-        this.astarget = loMerge({ remove_on_failure: true, remove_on_startup: true, documents_bulk_write_count: 1000 }, astarget);
+        this.astarget = loMerge({ remove_on_failure: true, remove_on_startup: true, documents_bulk_write_count: 1000, mode: 'insert', upsert_fields: '_id' }, astarget);
     }
 
     // as source
@@ -160,14 +162,42 @@ export class MongoDBDuplexConnector extends Validatable implements SourceConnect
             throw new Error("Need to connect to the data source before using this method.");
         }
 
+        const mode = this.astarget.mode;
         const collection = this.db.collection(collection_name);
 
         async function insert(documents: [CollectionDocument]) {
-            return await collection.bulkWrite(documents.map(({ obj: document }) => ({
-                insertOne: {
-                    document
+            return await collection.bulkWrite(documents.map(({ obj: document }) => {
+                if (mode === 'upsert') {
+                    return {
+                        replaceOne: {
+                            filter: { _id: document._id },
+                            replacement: document,
+                            upsert: true
+                        }
+                    };
                 }
-            }),
+                if (mode === 'merge') {
+                    return {
+                        updateOne: {
+                            filter: { _id: document._id },
+                            update: { $set: document },
+                            upsert: true
+                        }
+                    };
+                }
+                if (mode === 'delete') {
+                    return {
+                        deleteOne: {
+                            filter: { _id: document._id },
+                        }
+                    };
+                }
+                return {
+                    insertOne: {
+                        document
+                    }
+                };
+            },
                 {
                     ordered: false,
                     bypassDocumentValidation: true,
@@ -365,4 +395,14 @@ interface AsTargetOptions {
     * The greater this number is the better performance it will provide as it will make less writes to the MongoDB server.
     */
     documents_bulk_write_count: number;
+
+    /**
+     * Specifies how the import process should handle existing documents in the database that match documents in the import file.
+     */
+    mode?: 'insert' | 'upsert' | 'merge' | 'delete';
+
+    /**
+     * Specifies a list of fields for the query portion of the import process, can be used with mod upsert, merge and delete.
+     */
+    upsert_fields?: string;
 }
