@@ -166,37 +166,29 @@ export class MongoDBDuplexConnector extends Validatable implements SourceConnect
         const collection = this.db.collection(collection_name);
 
         async function insert(documents: [CollectionDocument]) {
-            return await collection.bulkWrite(documents.map(({ obj: document }) => {
-                if (mode === 'upsert') {
-                    return {
-                        replaceOne: {
-                            filter: { _id: document._id },
-                            replacement: document,
-                            upsert: true
-                        }
-                    };
-                }
-                if (mode === 'merge') {
-                    return {
-                        updateOne: {
-                            filter: { _id: document._id },
-                            update: { $set: document },
-                            upsert: true
-                        }
-                    };
-                }
-                if (mode === 'delete') {
-                    return {
-                        deleteOne: {
-                            filter: { _id: document._id },
-                        }
-                    };
-                }
-                return {
-                    insertOne: {
-                        document
-                    }
-                };
+            return await collection.bulkWrite(documents.map(({ obj: document }) => 
+                (mode === 'upsert' && {
+                    replaceOne: {
+                        filter: { _id: document._id },
+                        replacement: document,
+                        upsert: true,
+                    },
+                }) ||
+                (mode === 'merge' && {
+                    updateOne: {
+                        filter: { _id: document._id },
+                        update: { $set: document },
+                        upsert: true,
+                    },
+                }) ||
+                (mode === 'delete' && {
+                    deleteOne: {
+                        filter: { _id: document._id },
+                    },
+                }) || {
+                insertOne: {
+                    document,
+                },
             },
                 {
                     ordered: false,
